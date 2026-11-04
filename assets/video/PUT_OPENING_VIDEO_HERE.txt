@@ -1,0 +1,9 @@
+Drop the Cloud Thief opening animation in this folder as:
+
+    opening.mp4     (H.264 - plays everywhere)   and/or
+    opening.webm    (VP9/VP8 fallback)
+
+It autoplays muted and loops on the first screen, is scaled to fit the whole window (never cropped),
+and an invisible, keyboard-accessible Play button is placed over the painted "PLAY NOW" button.
+If the painted button sits somewhere other than the default spot, edit OPENING.playRect in index.html
+(fractions of the video frame: cx, cy, w, h). With no video here the game shows the illustrated title.
