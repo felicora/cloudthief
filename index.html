@@ -292,6 +292,14 @@ body.portrait[data-screen="playing"] #rotate-hint{display:flex}
 #opening{position:absolute;inset:0;display:none;background:#120e2e;overflow:hidden}
 body[data-opening="video"] #opening{display:block}
 #opening-ambient{position:absolute;inset:0;width:100%;height:100%;filter:blur(30px) saturate(1.2) brightness(.78);transform:scale(1.3)}
+#opening-anim{position:absolute;display:block;left:0;top:0;width:100%;height:100%;object-fit:contain;z-index:1;pointer-events:none}
+#opening-anim[hidden]{display:none}
+/* a friendly Sky Patrol drone hovers in the corner and hides the CapCut mark burned into the supplied animation */
+#opening-cover{position:absolute;display:none;z-index:2;pointer-events:none;user-select:none;transform-origin:50% 50%;will-change:transform;filter:drop-shadow(0 .35rem .5rem rgba(20,10,60,.35));animation:cover-float 3.4s ease-in-out infinite}
+body[data-opening="video"] #opening-cover{display:block}
+@keyframes cover-float{0%{transform:translate(-1.3%,0) rotate(-2deg)}25%{transform:translate(0,3.3%) rotate(0)}50%{transform:translate(1.3%,0) rotate(2deg)}75%{transform:translate(0,-3.3%) rotate(0)}100%{transform:translate(-1.3%,0) rotate(-2deg)}}
+@media (prefers-reduced-motion:reduce){#opening-cover{animation:none}}
+body[data-opening="video"] .chip-howto{left:auto;right:calc(4.6rem + var(--safe-r,0px))}
 #opening-video{position:absolute;display:block;left:0;top:0;width:100%;height:100%;object-fit:contain;z-index:1;pointer-events:none;background:transparent}
 body[data-opening="video"] #title-art,body[data-opening="video"] #title-fg,body[data-opening="video"] #btn-play{display:none}
 .play-hit{position:absolute;z-index:3;display:none;border-radius:999px;background:transparent;transition:box-shadow .15s,background .15s,transform .15s}
@@ -307,6 +315,10 @@ body[data-opening="video"] .play-hit{display:block}
 .mdots i.on{background:#ffd95a;border-color:#fff;box-shadow:0 0 .6rem rgba(255,200,60,.8)}
 .mdots i.cur{outline:.16rem solid #4fc79b;outline-offset:.14rem}
 .note{min-height:1.2em;font-weight:700;color:#2f8f6a}
+
+.howto-missions{font-size:.85rem;line-height:1.5;color:#4a4580;margin:.5rem 0 .2rem;text-align:center}
+.howto-missions b{color:#2f8f6a}
+.howto-credits{font-size:.66rem;line-height:1.35;opacity:.7;color:#4a4580;margin:.4rem 0 0;text-align:center}
 
 </style>
 </head>
@@ -383,7 +395,7 @@ body[data-opening="video"] .play-hit{display:block}
 
   <!-- ───────── Title ───────── -->
   <section id="screen-title" class="screen" aria-label="Title screen">
-    <div id="opening" aria-hidden="true"><canvas id="opening-ambient"></canvas><video id="opening-video" muted loop playsinline autoplay preload="auto" tabindex="-1" disablepictureinpicture></video></div>
+    <div id="opening" aria-hidden="true"><canvas id="opening-ambient"></canvas><canvas id="opening-anim" width="560" height="320" hidden></canvas><img id="opening-cover" alt="" decoding="async" draggable="false"><video id="opening-video" muted loop playsinline autoplay preload="auto" tabindex="-1" disablepictureinpicture></video></div>
     <div id="title-art" class="art"></div>
     <div id="title-fg" aria-hidden="true"></div>
     <button id="btn-play" class="play-btn" data-action="play" aria-label="Play Now"><span class="play-label">PLAY NOW</span><i class="play-shine"></i></button>
@@ -497,8 +509,10 @@ body[data-opening="video"] .play-hit{display:block}
         <li><span class="caps"><kbd>Z</kbd><i>or</i><kbd class="wide">Shift</kbd></span><b>Vacuum</b><small>Face a cloud, then hold</small></li>
         <li><span class="caps"><kbd class="wide">Esc</kbd></span><b>Pause</b></li>
       </ul>
-      <p class="howto-goal">Fill your cloud tank, dodge the Sky Patrol, then reach the airship! Lantern checkpoints save your place.</p>
+      <p class="howto-goal">Vacuum up EVERY cloud, dodge the Sky Patrol, then reach the airship! Lantern checkpoints save your place.</p>
       <p class="howto-touch">On touch screens use the on-screen buttons.</p>
+      <p class="howto-missions" id="howto-missions"></p>
+      <p class="howto-credits">Music: “Pixelland” — Kevin MacLeod (incompetech.com, CC BY 4.0) · “A Night Of Dizzy Spells” — Eric Skiff (CC BY 4.0) · “Sweet Cafe” — Stream Cafe · also “intro chinatown”, “Cinematic Chinese guitar”, “fortunehouse” and “bgm3” as supplied.</p>
       <button class="btn btn-mint" data-action="closehowto"><span>GOT IT!</span></button>
     </div>
   </section>
@@ -536,7 +550,9 @@ const CFG = Object.freeze({
   VISUAL_H: 112,                      // rendered character height in world units
   // — original vacuum values —
   VAC_RANGE: 140, VAC_PULL: 0.045, VAC_ABSORB: 28, VAC_HALF: Math.PI / 3,
-  HEARTS: 3, HURT_FRAMES: 120,
+  HEARTS: 3, HURT_FRAMES: 90,                      // brief invulnerability after a hit (was 120 frames: harder now)
+  // difficulty ("hard" tuning, applied to every mission) — set all four to 1 for the original, gentler game
+  HARD: { droneSpeed: 1.2, droneChase: 1.3, hazardTempo: 0.9, platformTimers: 0.85 },
   CLOUD_SIZES: { S: [50, 24, 1], M: [72, 32, 1.5], L: [100, 44, 2.5], C: [100, 56, 2.5] },
   PLAT_THICK: 18,
   MIN_CHAR_PX: 58,                    // smallest on-screen character height (phones)
@@ -676,7 +692,7 @@ const Snd = {
     this.musicResumeIfNeeded();
   },
   setSound(on) { this.sound = on; store.set('sound', on); if (this.sfx) this.sfx.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.03); if (!on) this.vacStop(); },
-  setMusic(on) { this.music = on; store.set('music', on); if (this.mus) this.mus.gain.setTargetAtTime(on ? (this.ducked ? 0.18 : 0.5) : 0, this.ctx.currentTime, 0.1); },
+  setMusic(on) { this.music = on; store.set('music', on); if (typeof Jukebox !== 'undefined') Jukebox.sync(); if (this.mus) this.mus.gain.setTargetAtTime(on ? (this.ducked ? 0.18 : 0.5) : 0, this.ctx.currentTime, 0.1); },
   duck(on) { this.ducked = on; if (this.mus && this.music) this.mus.gain.setTargetAtTime(on ? 0.18 : 0.5, this.ctx.currentTime, 0.15); },
 
   /** one enveloped oscillator */
@@ -1066,7 +1082,7 @@ const Game = {
   build(idx) {
     const D = LEVEL_DATA[idx], W = WORLDS[idx];
     this.idx = idx; this.mode = 'play'; this.ext = null; this.dyingT = 0;
-    this.time = 0; this.frame = 0; this.hearts = CFG.HEARTS; this.quota = 0; this.quotaMax = D.quota;
+    this.time = 0; this.frame = 0; this.hearts = CFG.HEARTS; this.quota = 0; this.quotaMax = D.clouds.filter((c) => c[2] !== 'C').length;       // EVERY cloud is required (the sealed Core is the separate finale)
     this.quotaFilled = false; this.collected = 0; this.damageTaken = 0; this.flash.canister = 0; this.flash.alert = 0;
     this.vacAimUp = false; this.vacHold = 0; this.cp = null; this.escape = null;
     const L = { idx, D, W, platforms: [], clouds: [], drones: [], hazards: [], zones: [], inter: [], cps: [], grpOn: {}, grpC: {}, grpNeed: {}, interDone: true, extract: null,
@@ -1080,7 +1096,7 @@ const Game = {
       L.clouds.push({ x: cx - w / 2, y: cy - h / 2, w, h, val, size, core: size === 'C', px: cx - w / 2, py: cy - h / 2, phase: rand(TAU), absorbed: false, absorbT: 0, dead: false, inCone: false, pull: 0, vis: { x: cx, y: cy } });
     }
     for (const [x, y, p0, p1, speed, kind, sl, o] of D.drones) {
-      L.drones.push({ x, y, px: x, py: y, w: 40, h: 20, baseY: y, patrolX: [p0, p1], speed, dir: 1, kind, searchlight: !!sl, fixed: !!(o && o.fixed),
+      L.drones.push({ x, y, px: x, py: y, w: 40, h: 20, baseY: y, patrolX: [p0, p1], speed: speed * CFG.HARD.droneSpeed, dir: 1, kind, searchlight: !!sl, fixed: !!(o && o.fixed),
         state: 'patrol', alertTimer: 0, chaseTimer: 0, slAngle: 0, slDir: 1, phase: rand(TAU), fade: 1, fx: null, tilt: 0, light: 0 });
     }
     const [ex, ey] = D.extract;
@@ -1088,7 +1104,7 @@ const Game = {
     let best = null;   // landing field = platform top directly below the marker centre
     for (const p of L.platforms) { if (ex + 30 >= p.x - 20 && ex + 30 <= p.x + p.w + 20 && p.y >= ey + 36 - 20 && p.y <= ey + 36 + 190) { if (!best || p.y < best.y) best = p; } }
     if (best) { L.extract.fx = clamp(ex + 30, best.x + 30, best.x + best.w - 30); L.extract.fy = best.y; }
-    for (const h of (D.hazards || [])) L.hazards.push(Object.assign({ active: false, st: 'rest', u: 0 }, h));
+    for (const h of (D.hazards || [])) { const o = Object.assign({ active: false, st: 'rest', u: 0 }, h); if (o.period) o.period = Math.max((o.warn || 0) + (o.on || 0) + 24, Math.round(o.period * CFG.HARD.hazardTempo)); L.hazards.push(o); }       // hazards cycle a little faster (warnings keep their length)
     L.zones = (D.zones || []).map((z) => Object.assign({}, z));
     for (const i of (D.inter || [])) { L.inter.push(Object.assign({ on: false, anim: 0 }, i)); if (i.grp && !i.opt) L.grpNeed[i.grp] = (L.grpNeed[i.grp] || 0) + 1; }
     L.interDone = L.inter.every((q) => q.opt);
@@ -1290,7 +1306,7 @@ const Game = {
   collect(c) {
     c.absorbed = true; c.absorbT = 0; this.collected++;
     const before = Math.floor(this.quota);
-    this.quota = c.core ? this.quota : Math.min(this.quota + c.val, this.quotaMax);          // the core is the finale, not part of the quota
+    this.quota = c.core ? this.quota : Math.min(this.quota + 1, this.quotaMax);          // counts clouds, not their size — a big cloud can no longer fill the tank early
     const nz = this.nozzle(), big = c.size === 'C' ? 2.2 : c.size === 'L' ? 1.6 : c.size === 'M' ? 1.2 : 1;
     Particles.sparks(nz.x, nz.y, Math.round(8 * big), { max: 4.5, lift: 0.2, scale: big });
     Particles.puff(nz.x, nz.y, Math.round(6 * big), { min: 0.6, max: 2.6, spread: Math.PI, dir: 0, scale: 0.6 * big, tint: '225,240,255', lift: 0 });
@@ -1330,7 +1346,7 @@ const Game = {
         if (!d.fixed && dist < range && (facingToward || dist < 70)) this.droneAlert(d, 60);
       } else if (d.state === 'alert') {
         d.alertTimer--;
-        if (d.alertTimer <= 0) { if (dist < 200) { d.state = 'chase'; d.chaseTimer = 240; Snd.play('chase'); d.fx = { k: '!', t: 0, red: true }; } else { d.state = 'patrol'; d.fx = { k: '?', t: 0 }; Snd.play('confused'); } }
+        if (d.alertTimer <= 0) { if (dist < 200) { d.state = 'chase'; d.chaseTimer = Math.round(240 * CFG.HARD.droneChase); Snd.play('chase'); d.fx = { k: '!', t: 0, red: true }; } else { d.state = 'patrol'; d.fx = { k: '?', t: 0 }; Snd.play('confused'); } }
       } else if (d.state === 'chase') {
         d.chaseTimer--;
         if (dist > 0.001) { d.x += (dx / dist) * d.speed * 1.8; d.y += (dy / dist) * d.speed * 1.8 * 0.6; }
@@ -1451,7 +1467,7 @@ const Tutorial = {
   line(key) {
     const t = this.touch();
     return { move: t ? 'Move with the arrow buttons' : 'Move with A and D', jump: t ? 'Tap the jump button' : 'Jump with Space', djump: t ? 'Tap jump again in the air' : 'Jump again in the air',
-             vac: t ? 'Hold the vacuum button near a cloud' : 'Hold Z to vacuum clouds', full: 'Cloud tank full! Reach the airship.' }[key];
+             vac: t ? 'Hold the vacuum button near a cloud' : 'Hold Z to vacuum clouds', full: 'All clouds collected! Reach the airship.' }[key];
   },
   reset(idx) {
     this.t = 0; this.alpha = 0; this.text = ''; this.startX = Game.P ? Game.P.x : 0; this.want = true;
@@ -1492,7 +1508,10 @@ function makePlatform(r) {
   const a = Array.isArray(r) ? { id: r[0], x: r[1], y: r[2], w: r[3], kind: r[4] } : r;
   const p = { id: a.id, x: a.x, y: a.y, w: a.w, h: CFG.PLAT_THICK, kind: a.kind, skin: a.skin || null, py: a.y, px: a.x, dx: 0, dy: 0, mover: null, art: null,
     solid: true, vis: 1, shake: 0, fall: 0, fvy: 0, warn: false, danger: false, sq: 0, cst: 'idle', ct: 0, touched: 0, bt: 0, glow: 0,
-    crumble: a.crumble || null, phase: a.phase || null, dissolve: a.dissolve || null, bounce: a.bounce || 0, electric: a.electric || null, grp: a.grp || null,
+    crumble: a.crumble ? Object.assign({}, a.crumble, { delay: Math.max(30, Math.round(a.crumble.delay * CFG.HARD.platformTimers)) }) : null,
+    phase: a.phase ? Object.assign({}, a.phase, { off: Math.round(a.phase.off * (2 - CFG.HARD.platformTimers)) }) : null,
+    dissolve: a.dissolve ? Object.assign({}, a.dissolve, { time: Math.round(a.dissolve.time * CFG.HARD.platformTimers) }) : null,
+    bounce: a.bounce || 0, electric: a.electric ? Object.assign({}, a.electric, { safe: Math.round(a.electric.safe * CFG.HARD.hazardTempo) }) : null, grp: a.grp || null,
     depth: a.depth || 0, seed: hashStr(String(a.id)), esc: !!a.esc };
   if (a.move) {
     const m = a.move;
@@ -1758,7 +1777,7 @@ Object.assign(Game, {
   coreReady() { const L = this.L; return this.quotaFilled && L.inter.every((q) => q.on || q.opt); },
   objText() {
     const D = this.L.D, O = D.obj;
-    if (!O || (!this.L.inter.length && !this.L.clouds.some((c) => c.core))) return this.quotaFilled ? 'Cloud tank full! Reach the airship!' : `Vacuum up ${this.quotaMax} clouds`;
+    if (!O || (!this.L.inter.length && !this.L.clouds.some((c) => c.core))) return this.quotaFilled ? 'All clouds collected! Reach the airship!' : `Vacuum up ALL ${this.quotaMax} clouds (${Math.floor(this.quota)} so far)`;
     if (this.escape) return O.escape || 'ESCAPE!';
     if (this.L.extract.active) return O.done;
     const parts = [], ic = this.interCount();
@@ -1785,7 +1804,7 @@ Object.assign(Game, {
   onCore() {
     if (this.escape) return; this.escape = { t: 0 }; this.L.grpOn.E = true;
     const core = this.L.cps.find((c) => c.core); if (core && !core.on) this.activateCheckpoint(core, true);
-    HUD.objective(this.objText(), true); Snd.play('alarm'); Snd.musicStart(WORLDS[this.idx].music + 10);
+    HUD.objective(this.objText(), true); Snd.play('alarm'); Jukebox.escape(true);
     Weather.pulse = 1;
   },
 
@@ -1837,7 +1856,7 @@ Object.assign(Game, {
   /* ═══ MISSION 4 — VOLCANIC SKYLANDS ═══ */
   LEVEL_DATA.push({
     name: 'MISSION 4', title: 'Volcanic Skylands', quota: 9,
-    obj: { unit: 'Clouds', names: {}, done: 'Cloud tank full! Reach the airship!', escape: 'ESCAPE!' },
+    obj: { unit: 'Clouds', names: {}, done: 'All clouds collected! Reach the airship!', escape: 'ESCAPE!' },
     start: [100, 1128],
     platforms: [
       P('A0', 30, 1128, 270, 'rock'), P('A1', 352, 1142, 84, 'forge'), P('A2', 462, 1152, 250, 'rock'),
@@ -1876,7 +1895,7 @@ Object.assign(Game, {
     inter: [SW(700, 728, 'A'), SW(1680, 668, 'B'), SW(760, 384, 'B')],
     cps: [CP(420, 1062), CP(1380, 668), CP(1560, 392)],
     clouds: [[300, 996, 'S'], [640, 790, 'M'], [560, 660, 'S'], [940, 580, 'S'], [1380, 598, 'M'], [1245, 370, 'L'], [1330, 336, 'S'], [1190, 380, 'M'], [840, 324, 'S'], [600, 296, 'L'], [330, 284, 'S'], [1420, 900, 'M'], [1260, 910, 'L']],
-    drones: [[1330, 540, 1330, 1650, 0.9, 'lamp', false, FIX], [1240, 880, 1240, 1640, 0.9, 'cadet', false, FIX]],
+    drones: [[1330, 540, 1330, 1600, 0.9, 'lamp', false, FIX], [1240, 880, 1240, 1540, 0.9, 'cadet', false, FIX]],
     extract: [290, 290],
   });
 
@@ -1901,7 +1920,7 @@ Object.assign(Game, {
     inter: [GEN(1850, 862), GEN(330, 470)],
     cps: [CP(1560, 966), CP(1190, 724), CP(450, 470)],
     clouds: [[500, 978, 'S'], [700, 950, 'M'], [960, 950, 'S'], [1570, 900, 'M'], [1180, 660, 'S'], [1390, 600, 'L'], [910, 580, 'M'], [700, 510, 'S'], [640, 340, 'S'], [870, 310, 'M'], [1330, 370, 'L'], [1700, 420, 'S']],
-    drones: [[1100, 470, 1000, 1300, 1.2, 'storm', false], [640, 330, 600, 900, 1.3, 'storm', false]],
+    drones: [[1100, 470, 1000, 1300, 1.2, 'storm', false], [640, 262, 600, 900, 1.3, 'storm', false, FIX]],
     extract: [1700, 440],
   });
 
@@ -1923,12 +1942,12 @@ Object.assign(Game, {
     ],
     zones: [UP(470, 830, 78, 300, -2.6, 0.08), CUR(1180, 760, 250, 170, -0.22), CUR(1400, 560, 220, 300, 0.26)],
     hazards: [
-      BAR(660, 1000, 28, 124, 'x', 650, 740, 0.8, 30, 0, 'coral'), JELLY(1150, 880, 78, 300, 70, 46, 0), JELLY(1400, 820, 70, 300, 70, 46, 150), SPIN(1220, 1015, 62, 0.04, 2, 'shell'),
+      BAR(660, 1000, 28, 124, 'x', 650, 740, 0.8, 30, 0, 'coral'), JELLY(1130, 960, 60, 300, 70, 46, 0), JELLY(1400, 820, 70, 300, 70, 46, 150), SPIN(1220, 1015, 62, 0.04, 2, 'shell'),
       POIS(1000, 960, 90, 40, 0.02, 0, 22), POIS(1520, 640, 90, 70, 0.022, 1.2, 22, true), POIS(1330, 480, 70, 60, 0.024, 2.4, 22, true),
     ],
     inter: [BEA(700, 912, 'P'), BEA(1290, 938, 'P'), BEA(1120, 1134, 'P')],
     cps: [CP(520, 1130), CP(850, 724), CP(1130, 724, { core: true })],
-    clouds: [[150, 1080, 'S'], [470, 1070, 'S'], [690, 850, 'S'], [860, 820, 'M'], [1000, 800, 'S'], [1260, 880, 'S'], [1110, 1070, 'M'], [1360, 980, 'S'], [1500, 820, 'M'], [1370, 690, 'L'], [900, 660, 'M'], [970, 630, 'C'], [1740, 250, 'S']],
+    clouds: [[150, 1080, 'S'], [470, 1070, 'S'], [690, 850, 'S'], [860, 820, 'M'], [1000, 800, 'S'], [1260, 880, 'S'], [1110, 1070, 'M'], [1360, 980, 'S'], [1500, 820, 'M'], [1370, 690, 'L'], [900, 660, 'M'], [970, 630, 'C'], [1255, 745, 'S']],
     drones: [],
     extract: [1700, 270],
   });
@@ -1997,7 +2016,7 @@ const Render = {
     if (G.debug) this.debug(ctx, G, L);
     /* 3 ─ screen-space layer */
     ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
-    Ambient.draw(ctx, V, { x: cx, y: cy });
+    if (!this.lite) Ambient.draw(ctx, V, { x: cx, y: cy });
     this.weatherArt(ctx, L, G);
     this.offscreenArrow(ctx, L, G, cx, cy);
     this.vignette(ctx, L);
@@ -2468,6 +2487,13 @@ Object.assign(Render, {
   /* ───────── zones: low gravity / wind / water current / updraft ───────── */
   zonesArt(ctx, L, G, cx, cy) {
     const t = G.time, key = L.W.key;
+    if (this.lite) {                                                  // cheap version: tinted area + arrows only
+      for (const z of L.zones) { if (z.x > cx + V.visW + 40 || z.x + z.w < cx - 40 || z.y > cy + V.visH + 40 || z.y + z.h < cy - 40) continue;
+        ctx.fillStyle = z.t === 'lowg' ? 'rgba(160,190,255,.14)' : z.t === 'updraft' ? 'rgba(255,190,120,.16)' : 'rgba(225,240,255,.12)'; ctx.fillRect(z.x, z.y, z.w, z.h);
+        ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 4; ctx.lineJoin = 'round'; const dir = z.t === 'updraft' ? 0 : (Math.sign(z.ax) || 0);
+        for (let k = 0; k < 3; k++) { const xx = z.x + z.w * (0.25 + 0.25 * k), yy = z.y + z.h / 2 + ((t * 40 + k * 90) % 120) - 60 * (dir === 0 ? 1 : 0); ctx.beginPath(); if (dir === 0) { ctx.moveTo(xx - 10, yy + 8); ctx.lineTo(xx, yy - 6); ctx.lineTo(xx + 10, yy + 8); } else { ctx.moveTo(xx - dir * 12, z.y + z.h / 2 - 11); ctx.lineTo(xx + dir * 8, z.y + z.h / 2); ctx.lineTo(xx - dir * 12, z.y + z.h / 2 + 11); } ctx.stroke(); } }
+      return;
+    }
     for (const z of L.zones) {
       if (z.x > cx + V.visW + 40 || z.x + z.w < cx - 40 || z.y > cy + V.visH + 40 || z.y + z.h < cy - 40) continue;
       ctx.save(); ctx.beginPath(); ctx.rect(z.x, z.y, z.w, z.h); ctx.clip();
@@ -2733,7 +2759,7 @@ Object.assign(Render, {
   /* ───────── screen-space weather + celebration overlays ───────── */
   weatherArt(ctx, L, G) {
     const W = V.cw, H = V.ch, k = Weather.kind;
-    if (k === 'storm' && Weather.bright < 0.6) {
+    if (k === 'storm' && Weather.bright < 0.6 && !this.lite) {
       ctx.save(); ctx.strokeStyle = `rgba(190,232,255,${0.5 * (1 - Weather.bright)})`; ctx.lineWidth = 1.4; ctx.beginPath();
       for (const r of Weather.rain) { const x = r.x * W, y = r.y * H, l = r.l * H; ctx.moveTo(x, y); ctx.lineTo(x - l * 0.32, y + l); } ctx.stroke(); ctx.restore();
     }
@@ -2814,18 +2840,18 @@ const UI = {
   /** the ONLY place a screen changes */
   setScreen(name) {
     const prev = Game.screen; Game.screen = name;
-    if (name === 'title') Opening.play(); else Opening.pause();
+    if (name === 'title') { Opening.play(); Snd.musicStop(); Jukebox.play('title'); } else { Opening.pause(); if (name === 'final') Jukebox.play('title'); else if (name === 'loading') Jukebox.stop(); }
     document.body.dataset.screen = name; $('app').dataset.screen = name;
     $('settings-panel').hidden = true; $('btn-settings').setAttribute('aria-expanded', 'false');
     Input.clear();
     switch (name) {
-      case 'title': Snd.vacStop(); Snd.humSet(0, false); Snd.duck(false); Snd.musicStart('title'); this.layoutTitle(); this.refreshContinue(); FinalFX.stop(); break;
+      case 'title': Snd.vacStop(); Snd.humSet(0, false); Snd.duck(false); this.layoutTitle(); this.refreshContinue(); FinalFX.stop(); break;
       case 'loading': Snd.vacStop(); Snd.humSet(0, false); break;
       case 'playing': Snd.duck(false); Game.last = performance.now(); Game.acc = 0; Game.dirty = true; break;
       case 'paused': Snd.vacStop(); Snd.humSet(0, false); Snd.duck(true); Game.dirty = true; break;
       case 'gameover': Game.dirty = true; Snd.duck(true); break;
       case 'complete': this.fillComplete(); Game.dirty = true; break;
-      case 'final': this.fillFinal(); Snd.duck(false); Snd.musicStart('title'); break;
+      case 'final': this.fillFinal(); Snd.duck(false); break;
     }
     this.toggleLabels();
     const ae = document.activeElement; if (ae && ae !== document.body && ae.blur) ae.blur();        // never leave a hidden button holding keyboard focus
@@ -2872,6 +2898,7 @@ const UI = {
   /** smooth transition from the opening page (or any screen) into a mission */
   async begin(idx) { if (this._beginning) return; this._beginning = true; try { await this.wipeIn(); Opening.leave(); await startMission(idx, true); } finally { this._beginning = false; this.wipeOut(); } },
   fillHowTo() {
+    const pd = Progress.data || Progress.load(); $('howto-missions').innerHTML = `<b>${LEVEL_DATA.length} missions, played in order:</b> ` + LEVEL_DATA.map((d, i) => `${pd.done[i] ? '✓ ' : ''}${i + 1} ${d.title}`).join(' · ');
     const touch = document.body.dataset.touch === 'on';
     document.querySelector('.howto-touch').style.display = touch ? 'block' : 'none';
     $('howto-keys').style.display = touch ? 'none' : 'flex';
@@ -2923,10 +2950,18 @@ const UI = {
   },
 
   error(missing) {
+    $('err-title').textContent = "Couldn't load artwork";
     $('err-text').textContent = `These pictures didn't load: ${missing.join(', ')}. Make sure the assets folder sits next to this page, then try again.`;
     this.setModal('error');
   },
 
+  /** a runtime fault must never leave the game frozen without a word */
+  fatal(msg) {
+    if (this._fatal) return; this._fatal = true; this.pendingMission = Math.max(0, Game.idx | 0);
+    $('err-title').textContent = 'Oops — something went wrong';
+    $('err-text').textContent = `Mission ${this.pendingMission + 1} hit a problem (${String(msg).slice(0, 140)}). Your saved progress is safe — press RETRY to restart this mission.`;
+    this.setModal('error');
+  },
   rootSize() {
     const u = Math.min(window.innerWidth / 1280, window.innerHeight / 720), touch = document.body.dataset.touch === 'on';
     document.documentElement.style.fontSize = clamp(u * 16, touch ? 13.5 : 12.5, 21) + 'px';
@@ -2973,7 +3008,7 @@ const UI = {
       case 'next': startMission(Math.min(Game.idx + 1, LEVEL_DATA.length - 1), false); break;
       case 'again': Game.results = []; startMission(0, false); break;
       case 'title': this.setModal(null); this.setScreen('title'); break;
-      case 'retryload': this.setModal(null); startMission(this.pendingMission, false); break;
+      case 'retryload': this._fatal = false; Game._faults = 0; this.setModal(null); startMission(this.pendingMission, false); break;
     }
   },
 };
@@ -3038,48 +3073,133 @@ const Progress = {
 };
 const fmtTime = (s) => { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
-/* Opening page: the supplied animation video (assets/video/opening.mp4 | .webm), contained (never cropped) on top of a
-   blurred copy of itself; a real, accessible Play button sits exactly over the painted "PLAY NOW" button.
-   If no video file exists the illustrated title is used instead — the game never depends on it. */
+/* Media (opening animation, its poster frame and the start-screen music). The folder build points at files in
+   assets/video and assets/audio; the standalone build embeds them. */
+const MEDIA = {"size":[1344,768],"video":[["assets/video/opening.mp4","video/mp4"],["assets/video/opening.webm","video/webm"]],"poster":"assets/video/poster.webp","frames":["assets/video/frames/f001.jpg","assets/video/frames/f002.jpg","assets/video/frames/f003.jpg","assets/video/frames/f004.jpg","assets/video/frames/f005.jpg","assets/video/frames/f006.jpg","assets/video/frames/f007.jpg","assets/video/frames/f008.jpg","assets/video/frames/f009.jpg","assets/video/frames/f010.jpg","assets/video/frames/f011.jpg","assets/video/frames/f012.jpg","assets/video/frames/f013.jpg","assets/video/frames/f014.jpg","assets/video/frames/f015.jpg","assets/video/frames/f016.jpg","assets/video/frames/f017.jpg","assets/video/frames/f018.jpg","assets/video/frames/f019.jpg","assets/video/frames/f020.jpg","assets/video/frames/f021.jpg","assets/video/frames/f022.jpg","assets/video/frames/f023.jpg","assets/video/frames/f024.jpg","assets/video/frames/f025.jpg","assets/video/frames/f026.jpg","assets/video/frames/f027.jpg","assets/video/frames/f028.jpg","assets/video/frames/f029.jpg","assets/video/frames/f030.jpg","assets/video/frames/f031.jpg","assets/video/frames/f032.jpg","assets/video/frames/f033.jpg","assets/video/frames/f034.jpg","assets/video/frames/f035.jpg","assets/video/frames/f036.jpg","assets/video/frames/f037.jpg","assets/video/frames/f038.jpg","assets/video/frames/f039.jpg","assets/video/frames/f040.jpg","assets/video/frames/f041.jpg","assets/video/frames/f042.jpg","assets/video/frames/f043.jpg","assets/video/frames/f044.jpg","assets/video/frames/f045.jpg","assets/video/frames/f046.jpg","assets/video/frames/f047.jpg","assets/video/frames/f048.jpg","assets/video/frames/f049.jpg","assets/video/frames/f050.jpg","assets/video/frames/f051.jpg","assets/video/frames/f052.jpg","assets/video/frames/f053.jpg","assets/video/frames/f054.jpg","assets/video/frames/f055.jpg","assets/video/frames/f056.jpg","assets/video/frames/f057.jpg","assets/video/frames/f058.jpg","assets/video/frames/f059.jpg","assets/video/frames/f060.jpg","assets/video/frames/f061.jpg","assets/video/frames/f062.jpg","assets/video/frames/f063.jpg","assets/video/frames/f064.jpg","assets/video/frames/f065.jpg","assets/video/frames/f066.jpg","assets/video/frames/f067.jpg","assets/video/frames/f068.jpg","assets/video/frames/f069.jpg","assets/video/frames/f070.jpg","assets/video/frames/f071.jpg","assets/video/frames/f072.jpg","assets/video/frames/f073.jpg","assets/video/frames/f074.jpg","assets/video/frames/f075.jpg","assets/video/frames/f076.jpg","assets/video/frames/f077.jpg","assets/video/frames/f078.jpg","assets/video/frames/f079.jpg","assets/video/frames/f080.jpg","assets/video/frames/f081.jpg","assets/video/frames/f082.jpg","assets/video/frames/f083.jpg","assets/video/frames/f084.jpg","assets/video/frames/f085.jpg","assets/video/frames/f086.jpg","assets/video/frames/f087.jpg","assets/video/frames/f088.jpg","assets/video/frames/f089.jpg","assets/video/frames/f090.jpg","assets/video/frames/f091.jpg","assets/video/frames/f092.jpg","assets/video/frames/f093.jpg","assets/video/frames/f094.jpg","assets/video/frames/f095.jpg","assets/video/frames/f096.jpg","assets/video/frames/f097.jpg","assets/video/frames/f098.jpg","assets/video/frames/f099.jpg","assets/video/frames/f100.jpg","assets/video/frames/f101.jpg"],"audioFiles":{"pixelland":"assets/audio/pixelland.mp3","sweet_cafe":"assets/audio/sweet_cafe.mp3","intro_chinatown":"assets/audio/intro_chinatown.mp3","cinematic_asia":"assets/audio/cinematic_asia.mp3","fortunehouse":"assets/audio/fortunehouse.mp3","dizzy_spells":"assets/audio/dizzy_spells.mp3","bgm3":"assets/audio/bgm3.mp3"},"music":{"title":{"f":"pixelland"},"m0":{"f":"sweet_cafe"},"m1":{"f":"pixelland","start":167.05,"end":233.85},"m2":{"f":"intro_chinatown"},"m3":{"f":"cinematic_asia"},"m4":{"f":"fortunehouse"},"m5":{"f":"dizzy_spells"},"m6":{"f":"bgm3"}},"cover":{"src":"assets/video/cover_drone.webp","w":0.17113,"l":-0.02307,"t":-0.10417}};
+const mediaURL = (src) => {
+  if (!src || src.slice(0, 5) !== 'data:') return src;                   // embedded → Blob URL (big data: URLs are unreliable as media sources)
+  try { const i = src.indexOf(','), bin = atob(src.slice(i + 1)), u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k); return URL.createObjectURL(new Blob([u], { type: src.slice(5, src.indexOf(';')) })); } catch (e) { return src; }
+};
+
+/* Opening page: the supplied animation video, contained (never cropped) on top of a blurred copy of itself; a real,
+   accessible Play button sits exactly over the painted "[ Play Now ]" button. If the video cannot be played the
+   illustrated title is used instead — the game never depends on it. */
 const OPENING = {
-  sources: [['assets/video/opening.mp4', 'video/mp4'], ['assets/video/opening.webm', 'video/webm']],
-  // painted Play-button rectangle as FRACTIONS of the video frame (cx, cy, w, h) — edit these if the video's button sits elsewhere
-  playRect: { cx: 1025 / 2048, cy: 1043 / 1152, w: 676 / 2048, h: 190 / 1152 },
+  size: MEDIA.size || [1344, 768],
+  // painted Play-button rectangle as FRACTIONS of the video frame (cx, cy, w, h), measured on the supplied animation
+  playRect: { cx: 0.4985, cy: 0.902, w: 0.318, h: 0.148 },
 };
 const Opening = {
-  v: null, ok: false, tried: false, ambient: null, actx: null, raf: 0,
+  v: null, cv: null, ok: false, tried: false, ambient: null, actx: null, raf: 0, timer: 0, watch: 0, anim: false, frames: null, fraf: 0, t0: 0, last: -1,
   init() {
-    const v = $('opening-video'); if (!v || this.tried) return; this.tried = true; this.v = v;
+    const v = $('opening-video'); if (!v || this.tried) return; this.tried = true; this.v = v; this.cv = $('opening-anim');
     v.muted = true; v.loop = true; v.playsInline = true; v.autoplay = true; v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.preload = 'auto';
-    v.addEventListener('loadeddata', () => { this.ok = true; document.body.dataset.opening = 'video'; this.layout(); this.play(); }, { once: true });
-    const fail = () => { if (!this.ok) { this.ok = false; document.body.dataset.opening = 'art'; } };
-    let n = 0; v.addEventListener('error', () => { if (++n >= OPENING.sources.length) fail(); }, true);
-    for (const [src, type] of OPENING.sources) { const s = document.createElement('source'); s.src = src; s.type = type; s.addEventListener('error', () => { if (++n >= OPENING.sources.length) fail(); }); v.appendChild(s); }
     this.ambient = $('opening-ambient'); this.actx = this.ambient ? this.ambient.getContext('2d') : null;
-    try { v.load(); } catch (e) { fail(); }
+    document.body.dataset.opening = 'video';                              // optimistic: the poster frame shows straight away
+    if (MEDIA.poster) v.poster = MEDIA.poster;                            // plain URL / data URI (no Blob: some previews block those)
+    this.cover = $('opening-cover'); if (this.cover && MEDIA.cover) this.cover.src = MEDIA.cover.src;
+    const list = (MEDIA.video || []).filter(([, type]) => v.canPlayType(type));
+    if (!list.length) { this.fallback(); return; }
+    v.addEventListener('loadeddata', () => { this.ok = true; this.layout(); if (Game.screen === 'title') this.play(); });
+    v.addEventListener('playing', () => { this.ok = true; this.animOff(); });
+    let n = 0; v.addEventListener('error', () => { if (++n >= list.length) this.fallback(); }, true);
+    for (const [src, type] of list) { const s = document.createElement('source'); s.src = mediaURL(src); s.type = type; v.appendChild(s); }
+    this.timer = setTimeout(() => { if (!this.ok && !v.readyState) this.fallback(); }, 9000);        // nothing arrived at all
+    try { v.load(); } catch (e) { this.fallback(); }
+    // browsers that refuse autoplay (low-power mode, strict policies, sandboxed previews) start it on the first tap / key
+    const kick = () => { if (Game.screen === 'title' && v.paused && !this.anim) this.play(); };
+    ['pointerdown', 'keydown', 'touchend'].forEach((ev) => document.addEventListener(ev, kick, { passive: true }));
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); else if (Game.screen === 'title') this.play(); });
   },
-  play() { if (this.v && this.ok) { const p = this.v.play(); if (p && p.catch) p.catch(() => { /* autoplay blocked: first tap restarts it */ }); this.loop(); } },
-  pause() { if (this.v) { try { this.v.pause(); } catch (e) {} } cancelAnimationFrame(this.raf); this.raf = 0; },
-  loop() { if (this.raf) return; const tick = () => { this.raf = 0; if (!this.ok || Game.screen !== 'title' || (this.v && this.v.paused)) return; this.drawAmbient(); this.raf = requestAnimationFrame(tick); }; this.raf = requestAnimationFrame(tick); },
+  /** the animation also ships as a 10 fps JPEG sequence drawn by the game itself: it works wherever a <video> is
+      blocked, cannot decode or is frozen — and needs neither Blob URLs nor animated-image support */
+  fallback() {
+    if (!MEDIA.frames || !MEDIA.frames.length) { if (!this.ok) document.body.dataset.opening = 'art'; return; }
+    this.animOn();
+  },
+  animOn() {
+    if (this.anim || !this.cv || !MEDIA.frames) return; this.anim = true;
+    if (!this.frames) this.frames = MEDIA.frames.map((u) => { const im = new Image(); im.decoding = 'async'; im.src = u; return im; });
+    this.cv.hidden = false; this.v.style.visibility = 'hidden'; document.body.dataset.opening = 'video'; this.layout(); this.t0 = performance.now(); this.last = -1; this.frameLoop();
+  },
+  animOff() { if (!this.anim) return; this.anim = false; cancelAnimationFrame(this.fraf); this.fraf = 0; this.cv.hidden = true; this.v.style.visibility = ''; },
+  frameLoop() {
+    if (this.fraf || !this.anim) return;
+    const step = () => {
+      this.fraf = 0; if (!this.anim || Game.screen !== 'title' || document.hidden) return;
+      const i = Math.floor((performance.now() - this.t0) / 100) % this.frames.length, im = this.frames[i];
+      if (i !== this.last && im.complete && im.naturalWidth) { this.cv.getContext('2d').drawImage(im, 0, 0, this.cv.width, this.cv.height); this.last = i; }
+      this.fraf = requestAnimationFrame(step);
+    };
+    this.fraf = requestAnimationFrame(step);
+  },
+  play() {
+    if (!this.v || document.body.dataset.opening !== 'video') return;
+    if (this.anim) { this.t0 = performance.now(); this.frameLoop(); return; }
+    const p = this.v.play(); if (p && p.catch) p.catch(() => { /* blocked: the watchdog below switches to the frame player, a tap retries */ }); this.loop();
+    clearTimeout(this.watch); this.watch = setTimeout(() => { if (Game.screen === 'title' && !document.hidden && !(this.v.currentTime > 0.05 && !this.v.paused)) this.animOn(); }, 2200);
+  },
+  pause() { clearTimeout(this.watch); cancelAnimationFrame(this.fraf); this.fraf = 0; if (this.v) { try { this.v.pause(); } catch (e) {} } cancelAnimationFrame(this.raf); this.raf = 0; },
+  loop() { if (this.raf) return; const tick = () => { this.raf = 0; if (Game.screen !== 'title' || (this.v && this.v.paused)) return; this.drawAmbient(); this.raf = requestAnimationFrame(tick); }; this.raf = requestAnimationFrame(tick); },
   drawAmbient() { const c = this.ambient, g = this.actx, v = this.v; if (!g || !v || v.readyState < 2) return; if (c.width !== 64) { c.width = 64; c.height = 36; } try { g.drawImage(v, 0, 0, 64, 36); } catch (e) {} },
   /** contain the video inside the viewport and place the invisible hit-area over the painted button */
   layout() {
-    const v = this.v; if (!v || !this.ok) return;
-    const vw = window.innerWidth, vh = window.innerHeight, iw = v.videoWidth || 1920, ih = v.videoHeight || 1080, s = Math.min(vw / iw, vh / ih);
-    const w = iw * s, h = ih * s, x = (vw - w) / 2, y = (vh - h) / 2;
-    Object.assign(v.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
-    const r = OPENING.playRect, hit = $('btn-play-hit'), bw = r.w * w, bh = r.h * h;
-    Object.assign(hit.style, { left: x + (r.cx - r.w / 2) * w + 'px', top: y + (r.cy - r.h / 2) * h + 'px', width: bw + 'px', height: bh + 'px' });
+    const v = this.v; if (!v || document.body.dataset.opening !== 'video') return;
+    const vw = window.innerWidth, vh = window.innerHeight, iw = v.videoWidth || OPENING.size[0], ih = v.videoHeight || OPENING.size[1], s = Math.min(vw / iw, vh / ih);
+    const w = iw * s, h = ih * s, x = (vw - w) / 2, y = (vh - h) / 2, box = { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' };
+    Object.assign(v.style, box); if (this.cv) Object.assign(this.cv.style, box);
+    if (this.cover && MEDIA.cover) { const c = MEDIA.cover; Object.assign(this.cover.style, { left: x + c.l * w + 'px', top: y + c.t * h + 'px', width: c.w * w + 'px', height: 'auto' }); }
+    const r = OPENING.playRect, hit = $('btn-play-hit');
+    Object.assign(hit.style, { left: x + (r.cx - r.w / 2) * w + 'px', top: y + (r.cy - r.h / 2) * h + 'px', width: r.w * w + 'px', height: r.h * h + 'px' });
   },
-  /** called when Play is pressed: smooth fade into the mission loading screen */
+  /** called when Play is pressed */
   leave() { this.pause(); },
 };
+
+/* Music: the start screen and every mission have their own supplied track (see MEDIA.music). Tracks cross-fade, loop,
+   respect the Music on/off setting, duck on pause / game over, and start on the first tap/key if autoplay is blocked.
+   Sound effects are unchanged. A "start"/"end" pair loops just that section of a longer song. */
+const Jukebox = {
+  els: {}, cur: null, want: null, duckK: 1, raf: 0, last: 0, urls: {}, VOL: 0.62, inited: false,
+  init() {
+    if (this.inited) return; this.inited = true;
+    const kick = () => { const a = this.els[this.want]; if (a && a.paused && !document.hidden && Snd.music) this.start(this.want); };
+    ['pointerdown', 'keydown', 'touchend', 'click'].forEach((ev) => document.addEventListener(ev, kick, { passive: true }));
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { for (const k in this.els) this.els[k].pause(); } else if (this.want && Snd.music) this.start(this.want); });
+    setInterval(() => this.guard(), 100);
+  },
+  def(key) { return (MEDIA.music || {})[key]; },
+  url(file) { return this.urls[file] || (this.urls[file] = mediaURL(MEDIA.audioFiles[file])); },
+  el(key) { let a = this.els[key]; if (a) return a; const d = this.def(key); if (!d) return null; a = this.els[key] = new Audio(); a.preload = 'auto'; a.src = this.url(d.f); a.loop = !d.end; a.volume = 0; return a; },
+  start(key) {
+    const a = this.el(key); if (!a) return; const d = this.def(key);
+    if (d.start && !a._seeked) { a._seeked = true; const seek = () => { try { a.currentTime = d.start; } catch (e) {} }; if (a.readyState >= 1) seek(); else a.addEventListener('loadedmetadata', seek, { once: true }); }
+    const p = a.play(); if (p && p.catch) p.catch(() => { /* waits for the first tap */ }); this.fade();
+  },
+  play(key) { this.want = key; if (!this.def(key)) return; this.init(); this.cur = key; if (Snd.music) this.start(key); this.fade(); },
+  stop() { this.want = null; this.fade(); },
+  guard() { const d = this.cur && this.def(this.cur), a = this.cur && this.els[this.cur]; if (a && d && d.end && !a.paused && a.currentTime >= d.end - 0.08) a.currentTime = d.start || 0; },
+  duck(on) { this.duckK = on ? 0.3 : 1; this.fade(); },
+  escape(on) { const a = this.els[this.cur]; for (const k in this.els) this.els[k].playbackRate = 1; if (a && on) a.playbackRate = 1.08; },     // the collapse escape runs 8% faster
+  sync() { if (this.want && Snd.music) this.start(this.want); this.fade(); },
+  fade() { if (!this.raf) { this.last = performance.now(); this.raf = requestAnimationFrame(() => this.tick()); } },
+  tick() {
+    this.raf = 0; const now = performance.now(), dt = Math.min(0.25, (now - this.last) / 1000); this.last = now; let busy = false;
+    for (const k in this.els) {
+      const a = this.els[k], tgt = (k === this.want && Snd.music) ? this.VOL * this.duckK : 0, d = tgt - a.volume;
+      if (Math.abs(d) < 0.012) { a.volume = tgt; if (tgt === 0 && !a.paused) a.pause(); } else { const st = Math.max(0.004, dt * 1.4); a.volume = clamp(d > 0 ? Math.min(tgt, a.volume + st) : Math.max(tgt, a.volume - st), 0, 1); busy = true; }
+    }
+    if (busy) this.raf = requestAnimationFrame(() => this.tick());
+  },
+};
+{ const baseDuck = Snd.duck.bind(Snd); Snd.duck = (on) => { baseDuck(on); Jukebox.duck(on); }; }
 
 /* ══════════════════════════════════════════════════════════════════
    MISSION FLOW + THE ONE PERMANENT GAME LOOP + BOOT
    ══════════════════════════════════════════════════════════════════ */
 let _starting = 0;
+Game._faults = 0; Game._slow = 0; Game._ema = 0;
+window.addEventListener('error', (e) => { if (Game.screen === 'playing' && e && e.message) { if (++Game._faults >= 3) UI.fatal(e.message); } });
 /** Load what the mission needs (real progress), then build the level. Safe to call repeatedly. */
 async function startMission(idx, fromTitle) {
   const token = ++_starting; UI.pendingMission = idx;
@@ -3095,7 +3215,7 @@ async function startMission(idx, fromTitle) {
   Loading.end();
   Game.build(idx); HUD.refresh(); Render.resize(); Game.snapCamera();
   UI.setScreen('playing'); UI.banner(idx);
-  Snd.musicStart(WORLDS[idx].music);
+  Snd.musicStop(); Jukebox.escape(false); Jukebox.play('m' + idx);
   if (idx < LEVEL_DATA.length - 1) Loader.prefetch('m' + (idx + 1)); else Loader.prefetch('final');
   Loader.prefetch('final');
 }
@@ -3106,17 +3226,21 @@ function frame(ts) {
   const dt = Math.min(Math.max((ts - (Game.last || ts)) / 1000, 0), CFG.MAX_FRAME); Game.last = ts;
   const s = Game.screen;
   if (s === 'playing' && Game.L) {
-    Game.acc += dt; let n = 0;
-    while (Game.acc >= CFG.STEP && n < 6) { Game.step(); Game.acc -= CFG.STEP; n++; }
-    if (n >= 6) Game.acc = 0;                                           // never spiral after a stall
-    Render.frame(Game.acc / CFG.STEP);
+    try {
+      Game.acc += dt; let n = 0;
+      while (Game.acc >= CFG.STEP && n < 6) { Game.step(); Game.acc -= CFG.STEP; n++; }
+      if (n >= 6) Game.acc = 0;                                           // never spiral after a stall
+      Render.frame(Game.acc / CFG.STEP);
+      // slow device? switch decorative effects (rain, zone streaks, motes) to a cheaper version automatically
+      Game._ema = (Game._ema || 0.0167) * 0.95 + dt * 0.05; if (Game._ema > 0.036) { Game._slowSince = Game._slowSince || performance.now(); if (!Render.lite && performance.now() - Game._slowSince > 2500) Render.lite = true; } else Game._slowSince = 0;
+    } catch (err) { console.error(err); if (++Game._faults >= 3) UI.fatal(err && err.message); }
   } else if ((s === 'paused' || s === 'gameover' || s === 'complete') && Game.L) {
     if (Game.dirty) { Render.frame(1); Game.dirty = false; }
   } else if (s === 'final') FinalFX.update(dt);
 }
 
 async function boot() {
-  Progress.load(); Input.init(); UI.init(); Render.init(); Render.resize(); Opening.init();
+  Progress.load(); Input.init(); UI.init(); Render.init(); Render.resize(); Opening.init(); Jukebox.init();
   document.body.dataset.screen = 'boot';
   try { await Promise.race([Promise.all([document.fonts.load("700 20px 'CT Poppins'"), document.fonts.load("500 16px 'CT Poppins'")]), sleep(1500)]); } catch (e) {}
   await Promise.all([Loader.one('playerRun'), Loader.one('uiCloudIcon')]); UI.applySprites();
@@ -3129,6 +3253,7 @@ async function boot() {
   else await sleep(250);
   UI.setScreen('title'); Loader.prefetch('m0');
   Game.last = performance.now(); cancelAnimationFrame(Game.loopId); Game.loopId = requestAnimationFrame(frame);
+  const q = /[?&]mission=(\d+)/.exec(location.search); if (q && +q[1] >= 1 && +q[1] <= LEVEL_DATA.length) UI.begin(+q[1] - 1);       // direct link: ?mission=6
   if (CFG.DEBUG) window.__CT = { Game, Input, UI, Loader, Render, V, Cam, Particles, Snd, startMission, LEVEL_DATA, HUD, Progress, Opening, Weather };
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
